@@ -1,6 +1,6 @@
 """
-SysInfo: A command line tool that displays information about the current system, including hardware and critical software.
-version 1.1
+PySInfo: A python command line tool that displays information about the current system, including hardware and critical software.
+version 1.0
 """
 
 import platform
@@ -14,6 +14,7 @@ import GPUtil
 import colorama
 import sys
 import subprocess
+import re
 from colorama import Fore, Style, Back
 
 def get_system_info():
@@ -29,13 +30,24 @@ def get_system_info():
     info["kernel"] = platform.release()
     info["uptime"] = get_uptime()
     
-    # Hardware Information
-    info["cpu"] = platform.processor()
+    # Hardware Information - Enhanced CPU details
+    cpu_info = get_detailed_cpu_info()
+    info["cpu_model"] = cpu_info.get("model", platform.processor())
+    info["cpu_arch"] = cpu_info.get("architecture", platform.machine())
     info["cpu_cores"] = f"{psutil.cpu_count(logical=False)} (Physical), {psutil.cpu_count(logical=True)} (Logical)"
+    info["cpu_freq"] = cpu_info.get("frequency", "Unknown")
+    info["cpu_cache"] = cpu_info.get("cache", "Unknown")
+    info["cpu_process"] = cpu_info.get("process", "Unknown")
     info["cpu_usage"] = f"{psutil.cpu_percent()}%"
     
+    # Enhanced Memory Information
+    memory_info = get_detailed_memory_info()
     mem = psutil.virtual_memory()
     info["memory"] = f"{bytes_to_readable(mem.used)} / {bytes_to_readable(mem.total)} ({mem.percent}%)"
+    info["memory_slots"] = memory_info.get("slots", "Unknown")
+    info["memory_type"] = memory_info.get("type", "Unknown")
+    info["memory_speed"] = memory_info.get("speed", "Unknown")
+    info["memory_timings"] = memory_info.get("timings", "Unknown")
     
     # Python Information
     info["python_version"] = f"{platform.python_version()} ({platform.python_implementation()})"
@@ -84,6 +96,202 @@ def get_system_info():
     info["terminal"] = f"{terminal_size.columns}x{terminal_size.lines}"
     
     return info
+
+def get_detailed_cpu_info():
+    """Get more detailed CPU information."""
+    cpu_info = {
+        "model": platform.processor(),
+        "architecture": platform.machine(),
+        "frequency": "Unknown",
+        "cache": "Unknown",
+        "process": "Unknown"
+    }
+    
+    try:
+        if platform.system() == "Windows":
+            # Try to get CPU model name using WMI
+            result = subprocess.run(["wmic", "cpu", "get", "name"], capture_output=True, text=True)
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                if len(lines) >= 2:
+                    cpu_info["model"] = lines[1].strip()
+            
+            # Get CPU frequency
+            result = subprocess.run(["wmic", "cpu", "get", "MaxClockSpeed"], capture_output=True, text=True)
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                if len(lines) >= 2:
+                    freq_mhz = lines[1].strip()
+                    if freq_mhz.isdigit():
+                        cpu_info["frequency"] = f"{int(freq_mhz)/1000:.2f} GHz"
+            
+            # Try to get cache information
+            result = subprocess.run(["wmic", "cpu", "get", "L2CacheSize,L3CacheSize"], capture_output=True, text=True)
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                if len(lines) >= 2:
+                    cache_parts = lines[1].strip().split()
+                    if len(cache_parts) >= 2:
+                        l2_cache = f"{int(cache_parts[0])/1024:.1f} MB" if cache_parts[0].isdigit() else "Unknown"
+                        l3_cache = f"{int(cache_parts[1])/1024:.1f} MB" if cache_parts[1].isdigit() else "Unknown"
+                        cpu_info["cache"] = f"L2: {l2_cache}, L3: {l3_cache}"
+            
+            # Try to get CPU process information from model name
+            model = cpu_info["model"].lower()
+            if any(x in model for x in ["ryzen", "epyc"]):
+                if "3000" in model or "4000" in model or "5000" in model:
+                    cpu_info["process"] = "7nm"
+                elif "6000" in model or "7000" in model:
+                    cpu_info["process"] = "5nm"
+                elif "7945" in model:
+                    cpu_info["process"] = "4nm"
+            elif any(x in model for x in ["intel", "core", "xeon"]):
+                if "10th" in model or "10" in model:
+                    cpu_info["process"] = "14nm"
+                elif "11th" in model or "11" in model:
+                    cpu_info["process"] = "10nm"
+                elif "12th" in model or "12" in model:
+                    cpu_info["process"] = "Intel 7 (10nm)"
+                elif "13th" in model or "13" in model or "14th" in model or "14" in model:
+                    cpu_info["process"] = "Intel 7 (10nm)"
+        else:
+            # For Linux systems
+            if os.path.exists("/proc/cpuinfo"):
+                with open("/proc/cpuinfo", "r") as f:
+                    cpuinfo = f.read()
+                
+                # Extract model name
+                model_match = re.search(r"model name\s+:\s+(.*)", cpuinfo)
+                if model_match:
+                    cpu_info["model"] = model_match.group(1)
+                
+                # Extract CPU frequency
+                freq_match = re.search(r"cpu MHz\s+:\s+(.*)", cpuinfo)
+                if freq_match:
+                    freq_mhz = float(freq_match.group(1))
+                    cpu_info["frequency"] = f"{freq_mhz/1000:.2f} GHz"
+                
+                # Extract cache info
+                cache_match = re.search(r"cache size\s+:\s+(.*)", cpuinfo)
+                if cache_match:
+                    cpu_info["cache"] = cache_match.group(1)
+    except Exception as e:
+        pass
+    
+    return cpu_info
+
+def get_detailed_memory_info():
+    """Get detailed memory information including slots, type, speed, and timings."""
+    memory_info = {
+        "slots": "Unknown",
+        "type": "Unknown",
+        "speed": "Unknown",
+        "timings": "Unknown"
+    }
+    
+    try:
+        if platform.system() == "Windows":
+            # Get memory type and speed
+            result = subprocess.run(["wmic", "memorychip", "get", "Capacity,Speed,DeviceLocator,MemoryType"], capture_output=True, text=True)
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                if len(lines) >= 2:
+                    # Parse memory slots info
+                    slots = []
+                    speeds = []
+                    mem_types = []
+                    
+                    for line in lines[1:]:
+                        if line.strip():
+                            parts = line.strip().split()
+                            if len(parts) >= 3:
+                                try:
+                                    capacity = int(parts[0])
+                                    slots.append(f"{capacity / (1024**3):.0f} GB")
+                                    
+                                    if parts[-2].isdigit():
+                                        speeds.append(f"{parts[-2]} MHz")
+                                    
+                                    # Convert memory type code to human-readable
+                                    mem_type_code = parts[-1] if parts[-1].isdigit() else "0"
+                                    mem_type = "Unknown"
+                                    mem_type_map = {
+                                        "0": "Unknown", "1": "Other", "2": "DRAM",
+                                        "3": "Synchronous DRAM", "4": "Cache DRAM",
+                                        "5": "EDO", "6": "EDRAM", "7": "VRAM",
+                                        "8": "SRAM", "9": "RAM", "10": "ROM",
+                                        "11": "Flash", "12": "EEPROM", "13": "FEPROM",
+                                        "14": "EPROM", "15": "CDRAM", "16": "3DRAM",
+                                        "17": "SDRAM", "18": "SGRAM", "19": "RDRAM",
+                                        "20": "DDR", "21": "DDR2", "22": "DDR2 FB-DIMM",
+                                        "24": "DDR3", "26": "DDR4", "27": "DDR5",
+                                        "28": "LPDDR", "29": "LPDDR2", "30": "LPDDR3",
+                                        "31": "LPDDR4", "32": "LPDDR5"
+                                    }
+                                    mem_types.append(mem_type_map.get(mem_type_code, "Unknown"))
+                                except:
+                                    pass
+                    
+                    if slots:
+                        memory_info["slots"] = f"{len(slots)} ({', '.join(slots)})"
+                    if speeds and len(set(speeds)) == 1:
+                        memory_info["speed"] = speeds[0]
+                    elif speeds:
+                        memory_info["speed"] = ', '.join(speeds)
+                    if mem_types and len(set(mem_types)) == 1 and mem_types[0] != "Unknown":
+                        memory_info["type"] = mem_types[0]
+            
+            # Try to get memory timings using a CAS latency estimate from speed
+            if memory_info["speed"] != "Unknown" and "MHz" in memory_info["speed"]:
+                speed_mhz = int(memory_info["speed"].split()[0])
+                if "DDR4" in memory_info["type"]:
+                    if speed_mhz >= 3600:
+                        memory_info["timings"] = "CL16-18-18-38 (estimated)"
+                    elif speed_mhz >= 3200:
+                        memory_info["timings"] = "CL16-18-18-36 (estimated)"
+                    elif speed_mhz >= 2666:
+                        memory_info["timings"] = "CL16-18-18-35 (estimated)"
+                    else:
+                        memory_info["timings"] = "CL16-16-16-32 (estimated)"
+                elif "DDR5" in memory_info["type"]:
+                    if speed_mhz >= 6000:
+                        memory_info["timings"] = "CL40-40-40-76 (estimated)"
+                    elif speed_mhz >= 5600:
+                        memory_info["timings"] = "CL36-36-36-76 (estimated)"
+                    elif speed_mhz >= 4800:
+                        memory_info["timings"] = "CL34-34-34-68 (estimated)"
+                    else:
+                        memory_info["timings"] = "CL30-30-30-60 (estimated)"
+        else:
+            # For Linux systems
+            if os.path.exists("/proc/meminfo"):
+                # Try using dmidecode if available
+                try:
+                    # This requires sudo permissions - may not work without them
+                    result = subprocess.run(["sudo", "dmidecode", "--type", "memory"], capture_output=True, text=True)
+                    if result.returncode == 0:
+                        output = result.stdout
+                        
+                        # Count memory slots
+                        slot_count = output.count("Memory Device")
+                        if slot_count > 0:
+                            memory_info["slots"] = str(slot_count)
+                        
+                        # Look for type
+                        type_match = re.search(r"Type: (DDR\d+)", output)
+                        if type_match:
+                            memory_info["type"] = type_match.group(1)
+                        
+                        # Look for speed
+                        speed_match = re.search(r"Speed: (\d+ MHz)", output)
+                        if speed_match:
+                            memory_info["speed"] = speed_match.group(1)
+                except:
+                    pass
+    except Exception as e:
+        pass
+    
+    return memory_info
 
 def check_cuda_version():
     try:
@@ -284,11 +492,19 @@ def print_system_info():
         f"{color}Terminal:{Style.RESET_ALL} {system_info['terminal']}",
         "",
         f"{Style.BRIGHT}{color}Hardware:{Style.RESET_ALL}",
-        f"{color}CPU:{Style.RESET_ALL} {system_info['cpu']}",
+        f"{color}CPU Model:{Style.RESET_ALL} {system_info['cpu_model']}",
+        f"{color}CPU Architecture:{Style.RESET_ALL} {system_info['cpu_arch']}",
+        f"{color}CPU Process:{Style.RESET_ALL} {system_info['cpu_process']}",
+        f"{color}CPU Freq:{Style.RESET_ALL} {system_info['cpu_freq']}",
+        f"{color}CPU Cache:{Style.RESET_ALL} {system_info['cpu_cache']}",
         f"{color}CPU Cores:{Style.RESET_ALL} {system_info['cpu_cores']}",
         f"{color}CPU Usage:{Style.RESET_ALL} {system_info['cpu_usage']}",
         f"{color}GPU:{Style.RESET_ALL} {system_info['gpu']}",
         f"{color}Memory:{Style.RESET_ALL} {system_info['memory']}",
+        f"{color}Memory Slots:{Style.RESET_ALL} {system_info['memory_slots']}",
+        f"{color}Memory Type:{Style.RESET_ALL} {system_info['memory_type']}",
+        f"{color}Memory Speed:{Style.RESET_ALL} {system_info['memory_speed']}",
+        f"{color}Memory Timings:{Style.RESET_ALL} {system_info['memory_timings']}",
         f"{color}Disk:{Style.RESET_ALL} {system_info['disk']}",
         "",
         f"{Style.BRIGHT}{color}Network:{Style.RESET_ALL}",
@@ -310,9 +526,9 @@ def print_system_info():
     
     # Print logo and info side by side
     logo_length = len(ascii_logo)
-    for i in range(logo_length):
-        logo_line = ascii_logo[i] if i < len(ascii_logo) else " " * logo_width
-        info_line = data_lines[i] if i < len(data_lines) else ""
+    for i in range(min(logo_length, len(data_lines))):
+        logo_line = ascii_logo[i]
+        info_line = data_lines[i]
         print(f"{color}{logo_line}{' ' * spacing}{Style.RESET_ALL}{info_line}")
     
     # Print remaining info
