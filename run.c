@@ -1,3 +1,4 @@
+// C_SysInfo - A simple system information tool written in C
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -621,7 +622,9 @@ void get_system_info(SystemInfo *info) {
 // Display system information
 void display_system_info(SystemInfo *info) {
     printf("%s@%s\n", info->username, info->hostname);
-    printf("----------------\n\n");
+    printf("----------------\n");
+    printf("    C_SysInfo   \n");
+    printf("----------------\n");
     
     printf(ANSI_COLOR_RED ANSI_BOLD "OS: " ANSI_COLOR_RESET "%s\n", info->os_name);
     printf(ANSI_COLOR_RED ANSI_BOLD "Kernel: " ANSI_COLOR_RESET "%s\n", info->kernel_version);
