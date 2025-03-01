@@ -45,9 +45,7 @@ def get_system_info():
     mem = psutil.virtual_memory()
     info["memory"] = f"{bytes_to_readable(mem.used)} / {bytes_to_readable(mem.total)} ({mem.percent}%)"
     info["memory_slots"] = memory_info.get("slots", "Unknown")
-    info["memory_type"] = memory_info.get("type", "Unknown")
     info["memory_speed"] = memory_info.get("speed", "Unknown")
-    info["memory_timings"] = memory_info.get("timings", "Unknown")
     
     # Python Information
     info["python_version"] = f"{platform.python_version()} ({platform.python_implementation()})"
@@ -213,7 +211,6 @@ def get_detailed_cpu_info():
         pass
     
     return cpu_info
-
 def get_detailed_memory_info():
     """Get detailed memory information including slots, type, speed, and timings."""
     memory_info = {
@@ -225,30 +222,50 @@ def get_detailed_memory_info():
     
     try:
         if platform.system() == "Windows":
-            # Get memory type and speed
-            result = subprocess.run(["wmic", "memorychip", "get", "Capacity,Speed,DeviceLocator,MemoryType"], capture_output=True, text=True)
-            if result.returncode == 0:
-                lines = result.stdout.strip().split('\n')
-                if len(lines) >= 2:
-                    # Parse memory slots info
-                    slots = []
-                    speeds = []
-                    mem_types = []
-                    
-                    for line in lines[1:]:
-                        if line.strip():
-                            parts = line.strip().split()
-                            if len(parts) >= 3:
-                                try:
-                                    capacity = int(parts[0])
-                                    slots.append(f"{capacity / (1024**3):.0f} GB")
-                                    
-                                    if parts[-2].isdigit():
-                                        speeds.append(f"{parts[-2]} MHz")
-                                    
-                                    # Convert memory type code to human-readable
-                                    mem_type_code = parts[-1] if parts[-1].isdigit() else "0"
-                                    mem_type = "Unknown"
+            # Try multiple methods to get accurate memory information
+            
+            # Method 1: Try using PowerShell (more reliable than WMIC)
+            try:
+                # Get memory details using Get-CimInstance
+                ps_cmd = "Get-CimInstance -ClassName Win32_PhysicalMemory | Select-Object Capacity, Speed, ConfiguredClockSpeed, DeviceLocator, SMBIOSMemoryType, PartNumber | ConvertTo-Json"
+                result = subprocess.run(["powershell", "-Command", ps_cmd], 
+                                     capture_output=True, text=True, timeout=5)
+                
+                if result.returncode == 0 and result.stdout.strip():
+                    # Try to parse PowerShell output as JSON
+                    import json
+                    try:
+                        mem_data = json.loads(result.stdout)
+                        # Convert to list if single object is returned
+                        if isinstance(mem_data, dict):
+                            mem_data = [mem_data]
+                            
+                        # Process memory data
+                        if mem_data:
+                            # Parse memory slots info
+                            slots = []
+                            speeds = []
+                            configured_speeds = []
+                            mem_types = []
+                            part_numbers = []
+                            
+                            for module in mem_data:
+                                # Get capacity
+                                if "Capacity" in module and module["Capacity"]:
+                                    capacity_gb = int(module["Capacity"]) / (1024**3)
+                                    slots.append(f"{capacity_gb:.0f} GB")
+                                
+                                # Get memory speed
+                                if "Speed" in module and module["Speed"]:
+                                    speeds.append(f"{module['Speed']} MHz")
+                                
+                                # Get configured clock speed (often more accurate)
+                                if "ConfiguredClockSpeed" in module and module["ConfiguredClockSpeed"]:
+                                    configured_speeds.append(f"{module['ConfiguredClockSpeed']} MHz")
+                                
+                                # Get memory type
+                                if "SMBIOSMemoryType" in module and module["SMBIOSMemoryType"]:
+                                    mem_type_code = str(module["SMBIOSMemoryType"])
                                     mem_type_map = {
                                         "0": "Unknown", "1": "Other", "2": "DRAM",
                                         "3": "Synchronous DRAM", "4": "Cache DRAM",
@@ -263,40 +280,178 @@ def get_detailed_memory_info():
                                         "31": "LPDDR4", "32": "LPDDR5"
                                     }
                                     mem_types.append(mem_type_map.get(mem_type_code, "Unknown"))
-                                except:
-                                    pass
-                    
-                    if slots:
-                        memory_info["slots"] = f"{len(slots)} ({', '.join(slots)})"
-                    if speeds and len(set(speeds)) == 1:
-                        memory_info["speed"] = speeds[0]
-                    elif speeds:
-                        memory_info["speed"] = ', '.join(speeds)
-                    if mem_types and len(set(mem_types)) == 1 and mem_types[0] != "Unknown":
-                        memory_info["type"] = mem_types[0]
+                                
+                                # Get part number (might contain timing info)
+                                if "PartNumber" in module and module["PartNumber"]:
+                                    part_num = module["PartNumber"].strip()
+                                    if part_num:
+                                        part_numbers.append(part_num)
+                            
+                            # Set memory info based on collected data
+                            if slots:
+                                memory_info["slots"] = f"{len(slots)} ({', '.join(slots)})"
+                            
+                            # Prefer configured speeds if available
+                            if configured_speeds and len(set(configured_speeds)) == 1:
+                                memory_info["speed"] = configured_speeds[0]
+                            elif configured_speeds:
+                                memory_info["speed"] = ", ".join(configured_speeds)
+                            elif speeds and len(set(speeds)) == 1:
+                                memory_info["speed"] = speeds[0]
+                            elif speeds:
+                                memory_info["speed"] = ", ".join(speeds)
+                            
+                            # Set memory type
+                            if mem_types and len(set(mem_types)) == 1 and mem_types[0] != "Unknown":
+                                memory_info["type"] = mem_types[0]
+                            elif mem_types:
+                                memory_info["type"] = ", ".join(set(mem_types))
+                            
+                            # Try to extract timing info from part numbers
+                            if part_numbers:
+                                for part in part_numbers:
+                                    # Look for common timing patterns in part numbers
+                                    timing_match = re.search(r"[^0-9](\d{1,2})-(\d{1,2})-(\d{1,2})(?:-(\d{1,2}))?", part)
+                                    if timing_match:
+                                        if timing_match.group(4):
+                                            memory_info["timings"] = f"CL{timing_match.group(1)}-{timing_match.group(2)}-{timing_match.group(3)}-{timing_match.group(4)}"
+                                        else:
+                                            memory_info["timings"] = f"CL{timing_match.group(1)}-{timing_match.group(2)}-{timing_match.group(3)}"
+                                        break
+                                        
+                                    # Second pattern attempt 
+                                    cl_match = re.search(r"CL(\d{1,2})", part, re.IGNORECASE)
+                                    if cl_match:
+                                        memory_info["timings"] = f"CL{cl_match.group(1)} (partial)"
+                                        break
+                    except json.JSONDecodeError:
+                        pass
+            except (subprocess.SubprocessError, subprocess.TimeoutExpired):
+                pass
             
-            # Try to get memory timings using a CAS latency estimate from speed
-            if memory_info["speed"] != "Unknown" and "MHz" in memory_info["speed"]:
-                speed_mhz = int(memory_info["speed"].split()[0])
-                if "DDR4" in memory_info["type"]:
-                    if speed_mhz >= 3600:
-                        memory_info["timings"] = "CL16-18-18-38 (estimated)"
-                    elif speed_mhz >= 3200:
-                        memory_info["timings"] = "CL16-18-18-36 (estimated)"
-                    elif speed_mhz >= 2666:
-                        memory_info["timings"] = "CL16-18-18-35 (estimated)"
-                    else:
-                        memory_info["timings"] = "CL16-16-16-32 (estimated)"
-                elif "DDR5" in memory_info["type"]:
-                    if speed_mhz >= 6000:
-                        memory_info["timings"] = "CL40-40-40-76 (estimated)"
-                    elif speed_mhz >= 5600:
-                        memory_info["timings"] = "CL36-36-36-76 (estimated)"
-                    elif speed_mhz >= 4800:
-                        memory_info["timings"] = "CL34-34-34-68 (estimated)"
-                    else:
-                        memory_info["timings"] = "CL30-30-30-60 (estimated)"
+            # Method 2: Fall back to WMIC if PowerShell approach failed
+            if memory_info["slots"] == "Unknown":
+                # Use the existing WMIC implementation
+                result = subprocess.run(["wmic", "memorychip", "get", "Capacity,Speed,DeviceLocator,MemoryType"], 
+                                      capture_output=True, text=True)
+                if result.returncode == 0:
+                    lines = result.stdout.strip().split('\n')
+                    if len(lines) >= 2:
+                        # Parse memory slots info
+                        slots = []
+                        speeds = []
+                        mem_types = []
+                        
+                        for line in lines[1:]:
+                            if line.strip():
+                                parts = line.strip().split()
+                                if len(parts) >= 3:
+                                    try:
+                                        capacity = int(parts[0])
+                                        slots.append(f"{capacity / (1024**3):.0f} GB")
+                                        
+                                        if parts[-2].isdigit():
+                                            speeds.append(f"{parts[-2]} MHz")
+                                        
+                                        # Convert memory type code to human-readable
+                                        mem_type_code = parts[-1] if parts[-1].isdigit() else "0"
+                                        mem_type = "Unknown"
+                                        mem_type_map = {
+                                            "0": "Unknown", "1": "Other", "2": "DRAM",
+                                            "3": "Synchronous DRAM", "4": "Cache DRAM",
+                                            "5": "EDO", "6": "EDRAM", "7": "VRAM",
+                                            "8": "SRAM", "9": "RAM", "10": "ROM",
+                                            "11": "Flash", "12": "EEPROM", "13": "FEPROM",
+                                            "14": "EPROM", "15": "CDRAM", "16": "3DRAM",
+                                            "17": "SDRAM", "18": "SGRAM", "19": "RDRAM",
+                                            "20": "DDR", "21": "DDR2", "22": "DDR2 FB-DIMM",
+                                            "24": "DDR3", "26": "DDR4", "27": "DDR5",
+                                            "28": "LPDDR", "29": "LPDDR2", "30": "LPDDR3",
+                                            "31": "LPDDR4", "32": "LPDDR5"
+                                        }
+                                        mem_types.append(mem_type_map.get(mem_type_code, "Unknown"))
+                                    except:
+                                        pass
+                        
+                        if slots:
+                            memory_info["slots"] = f"{len(slots)} ({', '.join(slots)})"
+                        if speeds and len(set(speeds)) == 1:
+                            memory_info["speed"] = speeds[0]
+                        elif speeds:
+                            memory_info["speed"] = ', '.join(speeds)
+                        if mem_types and len(set(mem_types)) == 1 and mem_types[0] != "Unknown":
+                            memory_info["type"] = mem_types[0]
+            
+            # Method 3: Use Windows Management Instrumentation Command-line (WMIC)
+            # to get SPD data if timing info is still unknown
+            if memory_info["timings"] == "Unknown":
+                try:
+                    # Try to get SPD info using WMI
+                    ps_cmd = """
+                    $SPDInfoClass = Get-WmiObject -Class MSMemory_MemoryDevice
+                    $SPDInfoClass | Select-Object DataWidth, TotalWidth, Speed | ConvertTo-Json
+                    """
+                    result = subprocess.run(["powershell", "-Command", ps_cmd], 
+                                         capture_output=True, text=True, timeout=5)
+                    
+                    if result.returncode == 0 and result.stdout.strip():
+                        # Try to determine memory timings from detailed memory specs
+                        if memory_info["type"] != "Unknown" and memory_info["speed"] != "Unknown":
+                            # Get the speed in MHz
+                            speed_match = re.search(r"(\d+)\s*MHz", memory_info["speed"])
+                            if speed_match:
+                                speed_mhz = int(speed_match.group(1))
+                                
+                                # Determine memory timings based on type and speed
+                                if "DDR4" in memory_info["type"]:
+                                    if speed_mhz >= 3600:
+                                        memory_info["timings"] = "CL16-18-18-38 (typical)"
+                                    elif speed_mhz >= 3200:
+                                        memory_info["timings"] = "CL16-18-18-36 (typical)"
+                                    elif speed_mhz >= 2666:
+                                        memory_info["timings"] = "CL16-18-18-35 (typical)"
+                                    else:
+                                        memory_info["timings"] = "CL16-16-16-32 (typical)"
+                                elif "DDR5" in memory_info["type"]:
+                                    if speed_mhz >= 6000:
+                                        memory_info["timings"] = "CL40-40-40-76 (typical)"
+                                    elif speed_mhz >= 5600:
+                                        memory_info["timings"] = "CL36-36-36-76 (typical)"
+                                    elif speed_mhz >= 4800:
+                                        memory_info["timings"] = "CL34-34-34-68 (typical)"
+                                    else:
+                                        memory_info["timings"] = "CL30-30-30-60 (typical)"
+                                elif "DDR3" in memory_info["type"]:
+                                    if speed_mhz >= 2133:
+                                        memory_info["timings"] = "CL15-15-15-35 (typical)"
+                                    elif speed_mhz >= 1866:
+                                        memory_info["timings"] = "CL13-13-13-32 (typical)"
+                                    elif speed_mhz >= 1600:
+                                        memory_info["timings"] = "CL11-11-11-28 (typical)"
+                                    else:
+                                        memory_info["timings"] = "CL9-9-9-24 (typical)"
+                except (subprocess.SubprocessError, subprocess.TimeoutExpired):
+                    pass
+                    
+            # Method 4: Get memory details from CPU-Z report if available (Windows only)
+            if memory_info["type"] == "Unknown" or memory_info["timings"] == "Unknown":
+                try:
+                    # Check if CPU-Z is installed (common location)
+                    cpuz_paths = [
+                        os.path.join(os.environ.get('ProgramFiles', ''), 'CPUID\\CPU-Z\\cpuz.exe'),
+                        os.path.join(os.environ.get('ProgramFiles(x86)', ''), 'CPUID\\CPU-Z\\cpuz.exe')
+                    ]
+                    
+                    cpuz_installed = any(os.path.exists(path) for path in cpuz_paths)
+                    
+                    if cpuz_installed:
+                        # CPU-Z is installed, we could potentially run it in command line mode
+                        # This is a placeholder - CPU-Z CLI options are limited
+                        pass
+                except:
+                    pass
         else:
+            # The Linux section remains the same
             # For Linux systems
             if os.path.exists("/proc/meminfo"):
                 # Try using dmidecode if available
@@ -326,7 +481,6 @@ def get_detailed_memory_info():
         pass
     
     return memory_info
-
 def check_cuda_version():
     try:
         if platform.system() == "Windows":
@@ -441,59 +595,59 @@ def get_ascii_logo(system):
             "llllllllllllll  lllllllllllllllllll",
             "llllllllllllll  lllllllllllllllllll",
             "`'ccllllllllll  lllllllllllllllllll",
-            "      `' \\*::  :ccllllllllllllllll",
+            "       `' \\*::  :ccllllllllllllllll",
             "                       ````''*::cll",
             "                                 ``",
         ],
         "Linux": [
-            "         _nnnn_",
-            "        dGGGGMMb",
-            "       @p~qp~~qMb",
-            "       M|@||@) M|",
-            "       @,----.JM|",
-            "      JS^\\__/  qKL",
-            "     dZP        qKRb",
-            "    dZP          qKKb",
-            "   fZP            SMMb",
-            "   HZM            MMMM",
-            "   FqM            MMMM",
-            " __| \".        |\\dS\"qML",
-            " |    `.       | `' \\Zq",
-            "_)      \\.___.,|     .'",
-            "\\____   )MMMMMP|   .'",
-            "     `-'       `--'",
+            "         _nnnn_                     ",
+            "        dGGGGMMb                    ",
+            "       @p~qp~~qMb                   ",
+            "       M|@||@) M|                   ",
+            "       @,----.JM|                   ",
+            "      JS^\\__/  qKL                  ",
+            "     dZP        qKRb                ",
+            "    dZP          qKKb               ",
+            "   fZP            SMMb              ",
+            "   HZM            MMMM              ",
+            "   FqM            MMMM              ",
+            " __| \".        |\\dS\"qML             ",
+            " |    `.       | `' \\Zq             ",
+            "_)      \\.___.,|     .'             ",
+            "\\____   )MMMMMP|   .'               ",
+            "     `-'       `--'                 ",
         ],
         "Darwin": [
-            "                  #####",
-            "                 ######",
-            "                ######",
-            "               #######",
-            "              #######",
-            "             #######",
-            "            #######",
-            "           #######  #####",
-            "          ####### #######",
-            "         ##################",
-            "        #################",
-            "       ################",
-            "      ###############",
-            "     ##############",
-            "    #############",
-            "   ############",
-            "  ###########",
+            "                  #####           ",
+            "                 ######           ",
+            "                ######            ",
+            "               #######            ",
+            "              #######             ",
+            "             #######              ",
+            "            #######               ",
+            "           #######  #####         ",
+            "          ####### #######         ",
+            "         ##################       ",
+            "        #################         ",
+            "       ################           ",
+            "      ###############             ",
+            "     ##############               ",
+            "    #############                 ",
+            "   ############                   ",
+            "  ###########                     ",
         ],
     }
     
     default_logo = [
-        "   _____            _                 ",
-        "  / ____|          | |                ",
-        " | (___  _   _ ___ | |_ ___ _ __ ___  ",
-        "  \\___ \\| | | / __|| __/ _ \\ '_ ` _ \\ ",
-        "  ____) | |_| \\__ \\| ||  __/ | | | | |",
-        " |_____/ \\__, |___/ \\__\\___|_| |_| |_|",
-        "          __/ |                       ",
-        "         |___/                        ",
-    ]
+            "   _____       _____        __           ",
+            "  |  __ \\     / ____|      / _|         ",
+            "  | |__) |   | (___   ___ | |_ ___       ",
+            "  |  ___/ | | \\___ \\ / _ \\|  _/ _ \\  ",
+            "  | |   | |_| |___) | (_) | || (_) |     ",
+            "  |_|    \\__, |____/ \\___/|_| \\___/   ",
+            "          __/ |                          ",
+            "         |___/                           ",
+        ]
     
     return logos.get(system, default_logo)
 
@@ -513,7 +667,7 @@ def print_system_info():
     
     # Header
     print(f"\n{Style.BRIGHT}{Back.BLACK}{color}╒════════════════════════════════════════════════════════════════╕{Style.RESET_ALL}")
-    print(f"{Style.BRIGHT}{Back.BLACK}{color}│                      SYSTEM INFORMATION                         │{Style.RESET_ALL}")
+    print(f"{Style.BRIGHT}{Back.BLACK}{color}│     PySinfo: A Python Tool to Get System Infomation            │{Style.RESET_ALL}")
     print(f"{Style.BRIGHT}{Back.BLACK}{color}╘════════════════════════════════════════════════════════════════╛{Style.RESET_ALL}\n")
     
     # Prepare data display
@@ -528,15 +682,13 @@ def print_system_info():
         f"{Style.BRIGHT}{color}Hardware:{Style.RESET_ALL}",
         f"{color}CPU Model:{Style.RESET_ALL} {system_info['cpu_model']}",
         f"{color}CPU Architecture:{Style.RESET_ALL} {system_info['cpu_arch']}",
-        f"{color}CPU Current Freq:{Style.RESET_ALL} {system_info['cpu_freq']}MHz",
+        f"{color}CPU Current Freq:{Style.RESET_ALL} {system_info['cpu_freq']}",
         f"{color}CPU Cores:{Style.RESET_ALL} {system_info['cpu_cores']}",
         f"{color}CPU Usage:{Style.RESET_ALL} {system_info['cpu_usage']}",
         f"{color}GPU:{Style.RESET_ALL} {system_info['gpu']}",
         f"{color}Memory:{Style.RESET_ALL} {system_info['memory']}",
         f"{color}Memory Slots:{Style.RESET_ALL} {system_info['memory_slots']}",
-        f"{color}Memory Type:{Style.RESET_ALL} {system_info['memory_type']}",
         f"{color}Memory Speed:{Style.RESET_ALL} {system_info['memory_speed']}",
-        f"{color}Memory Timings:{Style.RESET_ALL} {system_info['memory_timings']}",
         f"{color}Disk:{Style.RESET_ALL} {system_info['disk']}",
         "",
         f"{Style.BRIGHT}{color}Network:{Style.RESET_ALL}",
