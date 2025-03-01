@@ -1,0 +1,4 @@
+psutil
+distro
+GPUtil
+colorama
