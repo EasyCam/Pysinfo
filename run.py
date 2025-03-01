@@ -102,19 +102,53 @@ def get_detailed_cpu_info():
     cpu_info = {
         "model": platform.processor(),
         "architecture": platform.machine(),
-        "frequency": "Unknown",
-        "cache": "Unknown",
-        "process": "Unknown"
+        "frequency": psutil.cpu_freq().current if psutil.cpu_freq() else "Unknown",
+        "cores": f"{psutil.cpu_count(logical=False)} (Physical), {psutil.cpu_count(logical=True)} (Logical)",
+        "usage": f"{psutil.cpu_percent()}%"
     }
     
     try:
         if platform.system() == "Windows":
-            # Try to get CPU model name using WMI
-            result = subprocess.run(["wmic", "cpu", "get", "name"], capture_output=True, text=True)
-            if result.returncode == 0:
-                lines = result.stdout.strip().split('\n')
-                if len(lines) >= 2:
-                    cpu_info["model"] = lines[1].strip()
+            # Try multiple methods to get CPU model name
+            model = None
+            
+            # Method 1: Try using WMI
+            try:
+                result = subprocess.run(["wmic", "cpu", "get", "name"], capture_output=True, text=True)
+                if result.returncode == 0:
+                    lines = result.stdout.strip().split('\n')
+                    if len(lines) >= 2:
+                        model = lines[1].strip()
+            except:
+                pass
+            
+            # Method 2: Try using PowerShell if WMI fails
+            if not model or model == platform.processor():
+                try:
+                    result = subprocess.run(["powershell", "-Command", "(Get-CimInstance -Class Win32_Processor).Name"], 
+                                            capture_output=True, text=True)
+                    if result.returncode == 0 and result.stdout.strip():
+                        model = result.stdout.strip()
+                except:
+                    pass
+            
+            # Method 3: Registry as fallback
+            if not model or model == platform.processor():
+                try:
+                    result = subprocess.run(["reg", "query", "HKEY_LOCAL_MACHINE\\HARDWARE\\DESCRIPTION\\System\\CentralProcessor\\0", 
+                                            "/v", "ProcessorNameString"], capture_output=True, text=True)
+                    if result.returncode == 0:
+                        for line in result.stdout.split('\n'):
+                            if "ProcessorNameString" in line:
+                                model = line.split('REG_SZ')[1].strip()
+                except:
+                    pass
+            
+            if model and model != platform.processor():
+                cpu_info["model"] = model
+            
+            # Rest of the function remains the same...
+            # Get CPU frequency
             
             # Get CPU frequency
             result = subprocess.run(["wmic", "cpu", "get", "MaxClockSpeed"], capture_output=True, text=True)
@@ -494,9 +528,7 @@ def print_system_info():
         f"{Style.BRIGHT}{color}Hardware:{Style.RESET_ALL}",
         f"{color}CPU Model:{Style.RESET_ALL} {system_info['cpu_model']}",
         f"{color}CPU Architecture:{Style.RESET_ALL} {system_info['cpu_arch']}",
-        f"{color}CPU Process:{Style.RESET_ALL} {system_info['cpu_process']}",
-        f"{color}CPU Freq:{Style.RESET_ALL} {system_info['cpu_freq']}",
-        f"{color}CPU Cache:{Style.RESET_ALL} {system_info['cpu_cache']}",
+        f"{color}CPU Current Freq:{Style.RESET_ALL} {system_info['cpu_freq']}MHz",
         f"{color}CPU Cores:{Style.RESET_ALL} {system_info['cpu_cores']}",
         f"{color}CPU Usage:{Style.RESET_ALL} {system_info['cpu_usage']}",
         f"{color}GPU:{Style.RESET_ALL} {system_info['gpu']}",
