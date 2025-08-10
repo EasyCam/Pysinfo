@@ -63,3 +63,46 @@ llllllllllllll  lllllllllllllllllll    Memory: 28.94 GB / 95.18 GB (30.4%)
 
 ██████████████████████████████████████████
 ```
+
+
+
+```Bash
+╒════════════════════════════════════════════════════════════════╕
+│     PySinfo: A Python Tool to Get System Infomation            │
+╘════════════════════════════════════════════════════════════════╛
+
+         _nnnn_                         OS: Ubuntu 24.04
+        dGGGGMMb                        Host: MSI
+       @p~qp~~qMb                       Kernel: 5.15.167.4-microsoft-standard-WSL2
+       M|@||@) M|                       Uptime: 0 days, 0 hours, 0 minutes
+       @,----.JM|                       Shell: bash
+      JS^\__/  qKL                      Terminal: 87x48
+     dZP        qKRb
+    dZP          qKKb                   Hardware:
+   fZP            SMMb                  CPU Model: AMD Ryzen 9 7945HX with Radeon Graphics
+   HZM            MMMM                  CPU Architecture: x86_64
+   FqM            MMMM                  CPU Current Freq: 2.50 GHz
+ __| ".        |\dS"qML                 CPU Cores: 4 (Physical), 8 (Logical)
+ |    `.       | `' \Zq                 CPU Usage: 0.0%
+_)      \.___.,|     .'                 GPU: NVIDIA GeForce RTX 4060 Laptop GPU (8.00 GB)
+\____   )MMMMMP|   .'                   Memory: 716.67 MB / 31.35 GB (3.5%)
+     `-'       `--'                     Memory Slots: Unknown
+                                        Memory Speed: Unknown
+                                        Disk: 155.09 GB / 1006.85 GB (16.2%)
+
+                                        Network:
+                                        IP Address: 127.0.1.1
+
+                                        Development Environment:
+                                        Python: 3.11.7 (CPython)
+                                        Python Path: /home/fred/anaconda3/bin/python
+
+                                        Graphics API Support:
+                                        CUDA: 12.9.86
+                                        OpenCL: Not detected
+                                        Vulkan: Not detected
+
+██████████████████████████████████████████
+
+Report generated on: 2025-08-10 19:36:05
+```
