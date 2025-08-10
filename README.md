@@ -25,7 +25,6 @@ python -m pysinfo
 ### Example
 
 ```Bash
-
 ╒════════════════════════════════════════════════════════════════╕
 │     PySinfo: A Python Tool to Get System Infomation            │
 ╘════════════════════════════════════════════════════════════════╛
@@ -33,35 +32,37 @@ python -m pysinfo
                                 ..,    OS: Windows 10.0.26100
                     ....,,:;+ccllll    Host: MSI
       ...,,+:;  cllllllllllllllllll    Kernel: 11
-,cclllllllllll  lllllllllllllllllll    Uptime: 0 days, 22 hours, 50 minutes
+,cclllllllllll  lllllllllllllllllll    Uptime: 2 days, 20 hours, 33 minutes
 llllllllllllll  lllllllllllllllllll    Shell: cmd.exe
-llllllllllllll  lllllllllllllllllll    Terminal: 92x49
+llllllllllllll  lllllllllllllllllll    Terminal: 87x48
 llllllllllllll  lllllllllllllllllll
 llllllllllllll  lllllllllllllllllll    Hardware:
 llllllllllllll  lllllllllllllllllll    CPU Model: AMD Ryzen 9 7945HX with Radeon Graphics
                                        CPU Architecture: AMD64
 llllllllllllll  lllllllllllllllllll    CPU Current Freq: 2501.0
 llllllllllllll  lllllllllllllllllll    CPU Cores: 16 (Physical), 32 (Logical)
-llllllllllllll  lllllllllllllllllll    CPU Usage: 6.3%
+llllllllllllll  lllllllllllllllllll    CPU Usage: 5.9%
 llllllllllllll  lllllllllllllllllll    GPU: NVIDIA GeForce RTX 4060 Laptop GPU (8.00 GB)
-llllllllllllll  lllllllllllllllllll    Memory: 28.94 GB / 95.18 GB (30.4%)
-`'ccllllllllll  lllllllllllllllllll    Memory Slots: 2 (48 GB, 48 GB)
+llllllllllllll  lllllllllllllllllll    Memory: 40.35 GB / 127.18 GB (31.7%)
+`'ccllllllllll  lllllllllllllllllll    Memory Slots: 2 (64 GB, 64 GB)
        `' \*::  :ccllllllllllllllll    Memory Speed: 5200 MHz
-                       ````''*::cll    Disk: 3.50 TB / 3.64 TB (96.3%)
+                       ````''*::cll    Disk: 3.28 TB / 3.64 TB (90.2%)
                                  ``
                                        Network:
-                                       IP Address: 192.168.0.2
+                                       IP Address: 192.168.0.25
 
                                        Development Environment:
-                                       Python: 3.12.2 (CPython)
+                                       Python: 3.12.9 (CPython)
                                        Python Path: C:\Miniconda3\python.exe
 
                                        Graphics API Support:
                                        CUDA: 12.6.85
-                                       OpenCL: Platform Version:                            OpenCL 3.0 CUDA 12.8.51
-                                       Vulkan: 1.4.303
+                                       OpenCL: Platform Version:                       OpenCL 3.0 CUDA 13.0.48
+                                       Vulkan: 1.4.309
 
 ██████████████████████████████████████████
+
+Report generated on: 2025-08-10 19:39:18
 ```
 
 
