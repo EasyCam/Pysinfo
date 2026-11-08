@@ -11,6 +11,7 @@
 - 一屏展示:系统、内核、运行时长、Shell、终端、CPU、GPU、内存、磁盘、网络、Python、CUDA/OpenCL/Vulkan
 - **自适应终端宽度**:任何行都不换行/串行;过长的值用 `…` 截断;窗口太窄时自动把图标竖排到信息上方
 - **平台图标**:企鹅(Linux)、田字窗(Windows)、苹果(macOS)、小恶魔 Beastie(FreeBSD / OpenBSD / NetBSD / DragonFly)
+- **多显卡支持**:每张卡单独一行(`GPU 1:`、`GPU 2:` …);NVIDIA 走 NVML,AMD/Intel 走 lspci/sysfs,AMD 显存从 sysfs 读取
 - **`--logo` 参数**:在任意机器上强制预览其它平台的图标和主题色
 - 纯 Python,依赖少:psutil / distro / GPUtil-fix / colorama
 
@@ -66,7 +67,7 @@ CPU Architecture: x86_64
 CPU Current Freq: 3.54 GHz
 CPU Cores: 16 (Physical), 32 (Logical)
 CPU Usage: 0.0%
-GPU: Strix Halo [Radeon Graphics / Radeon 8050S Graphics / Radeon 8060S Graphics]
+GPU: Strix Halo [Radeon Graphics / Radeon 8050S Graphics / Radeon 8060S Graphics] (4.00 GB)
 Memory: 51.57 GB / 119.24 GB (43.2%)
 Disk: 914.96 GB / 3.58 TB (26.3%)
 

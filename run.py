@@ -59,35 +59,35 @@ def get_system_info():
         exe = "~" + exe[len(home):]
     info["python_path"] = exe
     
-    # Try to get GPU info and CUDA support
+    # GPU: NVML/NVIDIA first (GPUtil), then a root-free lspci/sysfs fallback.
+    # GPUtil raises when nvidia-smi is missing, so the fallback must also run
+    # on exceptions - otherwise AMD-only machines report "unavailable".
+    gpu_list = []
     try:
-        gpus = GPUtil.getGPUs()
-        if gpus:
-            gpu_info = []
-            for i, gpu in enumerate(gpus):
-                gpu_info.append(f"{gpu.name} ({bytes_to_readable(gpu.memoryTotal * 1024 * 1024)})")
-            info["gpu"] = " | ".join(gpu_info)
-            
-            # Check CUDA support
-            cuda_version = check_cuda_version()
-            info["cuda"] = cuda_version if cuda_version else "Not detected"
-        else:
-            fallback_gpus = get_fallback_gpus()
-            info["gpu"] = " | ".join(fallback_gpus) if fallback_gpus else "No dedicated GPU detected"
-            info["cuda"] = "Not available"
+        for gpu in GPUtil.getGPUs():
+            gpu_list.append(f"{gpu.name} ({bytes_to_readable(gpu.memoryTotal * 1024 * 1024)})")
     except Exception:
-        if platform.system() == "Darwin":
+        pass
+    if not gpu_list:
+        gpu_list = get_fallback_gpus()
+    if not gpu_list and platform.system() == "Darwin":
+        try:
             result = subprocess.run(
                 ["system_profiler", "SPDisplaysDataType"],
                 capture_output=True,
-                text=True
+                text=True,
+                timeout=10,
             )
-            matches = re.findall(r"Chipset Model:\s+(.*)", result.stdout)
-            info["gpu"] = " | ".join(matches) if matches else "Apple GPU"
-            info["cuda"] = "Not supported on macOS"
-        else:
-            info["gpu"] = "GPU information unavailable"
-            info["cuda"] = "Not detected"
+            gpu_list = re.findall(r"Chipset Model:\s+(.*)", result.stdout) or ["Apple GPU"]
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
+            gpu_list = []
+    info["gpus"] = gpu_list
+
+    if platform.system() == "Darwin":
+        info["cuda"] = "Not supported on macOS"
+    else:
+        cuda_version = check_cuda_version()
+        info["cuda"] = cuda_version if cuda_version else "Not available"
     
     # Check OpenCL support
     info["opencl"] = check_opencl_version()
@@ -548,7 +548,10 @@ def get_detailed_memory_info():
     return memory_info
 
 def get_fallback_gpus():
-    """Detect GPUs without root or NVML (lspci first, then sysfs vendor IDs)."""
+    """Detect GPUs without root or NVML (lspci first, then sysfs vendor IDs).
+
+    Returns one entry per card so multi-GPU machines get one line per GPU.
+    """
     gpus = []
     if platform.system() == "Linux":
         try:
@@ -556,9 +559,13 @@ def get_fallback_gpus():
             if result.returncode == 0:
                 for line in result.stdout.splitlines():
                     if re.search(r"(VGA compatible controller|3D controller|Display controller)", line):
-                        name = line.split(":", 2)[-1].strip()
+                        addr, _, desc = line.partition(" ")
+                        name = desc.split(":", 1)[-1].strip()
                         name = re.sub(r"^.*\[AMD/ATI\]\s*", "", name)
                         name = name.split("(")[0].strip()
+                        vram = _read_amd_vram(addr)
+                        if vram:
+                            name = f"{name} ({vram})"
                         if name and name not in gpus:
                             gpus.append(name)
         except (subprocess.SubprocessError, FileNotFoundError):
@@ -580,6 +587,15 @@ def get_fallback_gpus():
             except OSError:
                 pass
     return gpus
+
+def _read_amd_vram(pci_addr):
+    """VRAM size for amdgpu cards, straight from sysfs (no root needed)."""
+    addr = pci_addr if pci_addr.count(":") >= 2 else f"0000:{pci_addr}"
+    try:
+        with open(f"/sys/bus/pci/devices/{addr}/mem_info_vram_total") as f:
+            return bytes_to_readable(int(f.read().strip()))
+    except (OSError, ValueError):
+        return ""
 
 def get_primary_ip():
     """Best-effort LAN IP without root (UDP connect trick sends no packets)."""
@@ -892,7 +908,17 @@ def print_system_info(logo_os=None):
         f"{color}CPU Current Freq:{Style.RESET_ALL} {system_info['cpu_freq']}",
         f"{color}CPU Cores:{Style.RESET_ALL} {system_info['cpu_cores']}",
         f"{color}CPU Usage:{Style.RESET_ALL} {system_info['cpu_usage']}",
-        f"{color}GPU:{Style.RESET_ALL} {system_info['gpu']}",
+    ]
+
+    # One line per GPU, so multi-card machines stay readable
+    gpus = system_info.get("gpus") or []
+    for i, gpu in enumerate(gpus, 1):
+        label = "GPU" if len(gpus) == 1 else f"GPU {i}"
+        data_lines.append(f"{color}{label}:{Style.RESET_ALL} {gpu}")
+    if not gpus:
+        data_lines.append(f"{color}GPU:{Style.RESET_ALL} Not detected")
+
+    data_lines += [
         f"{color}Memory:{Style.RESET_ALL} {system_info['memory']}",
         f"{color}Memory Slots:{Style.RESET_ALL} {system_info['memory_slots']}",
         f"{color}Memory Speed:{Style.RESET_ALL} {system_info['memory_speed']}",
