@@ -1,8 +1,16 @@
 # PySInfo
 
-PySInfo: A python command line tool that displays information about the current system, including hardware and critical software.
+PySInfo: A Python command line tool that displays information about the current system, including hardware and critical software.
 
-version 1.1
+version 1.3.3
+
+## Features
+
+- One-screen summary: OS, kernel, uptime, shell, terminal, CPU, GPU, memory, disk, network, Python, CUDA/OpenCL/Vulkan
+- **No root required**: anything that would need root (e.g. SMBIOS memory slots/speed) is simply left out instead of shown as "Unknown"
+- **Responsive layout**: fits the terminal width and never wraps; over-long values are shortened with `…`, and narrow windows stack the logo above the info block
+- **Per-platform logos**: Tux (Linux), Windows tiles (田), Apple (macOS), BSD Daemon / Beastie (FreeBSD, OpenBSD, NetBSD, DragonFly)
+- **`--logo` flag** to preview any platform's logo (and theme color) on any machine
 
 ## Installation
 
@@ -19,91 +27,70 @@ python -m pysinfo
 
 ```Bash
 pip install pysinfo
-python -m pysinfo
+pysinfo
 ```
 
-### Example
+## Usage
 
 ```Bash
-╒════════════════════════════════════════════════════════════════╕
-│     PySinfo: A Python Tool to Get System Infomation            │
-╘════════════════════════════════════════════════════════════════╛
+pysinfo                     # detect the current platform
+python -m pysinfo           # same, run as a module
+python run.py               # standalone single-file version
 
-                                ..,    OS: Windows 10.0.26100
-                    ....,,:;+ccllll    Host: MSI
-      ...,,+:;  cllllllllllllllllll    Kernel: 11
-,cclllllllllll  lllllllllllllllllll    Uptime: 2 days, 20 hours, 33 minutes
-llllllllllllll  lllllllllllllllllll    Shell: cmd.exe
-llllllllllllll  lllllllllllllllllll    Terminal: 87x48
-llllllllllllll  lllllllllllllllllll
-llllllllllllll  lllllllllllllllllll    Hardware:
-llllllllllllll  lllllllllllllllllll    CPU Model: AMD Ryzen 9 7945HX with Radeon Graphics
-                                       CPU Architecture: AMD64
-llllllllllllll  lllllllllllllllllll    CPU Current Freq: 2501.1
-llllllllllllll  lllllllllllllllllll    CPU Cores: 16 (Physical), 32 (Logical)
-llllllllllllll  lllllllllllllllllll    CPU Usage: 5.9%
-llllllllllllll  lllllllllllllllllll    GPU: NVIDIA GeForce RTX 4060 Laptop GPU (8.00 GB)
-llllllllllllll  lllllllllllllllllll    Memory: 40.35 GB / 127.18 GB (31.7%)
-`'ccllllllllll  lllllllllllllllllll    Memory Slots: 2 (64 GB, 64 GB)
-       `' \*::  :ccllllllllllllllll    Memory Speed: 5200 MHz
-                       ````''*::cll    Disk: 3.28 TB / 3.64 TB (90.2%)
-                                 ``
-                                       Network:
-                                       IP Address: 192.168.0.25
-
-                                       Development Environment:
-                                       Python: 3.12.9 (CPython)
-                                       Python Path: C:\Miniconda3\python.exe
-
-                                       Graphics API Support:
-                                       CUDA: 12.6.85
-                                       OpenCL: Platform Version:                       OpenCL 3.0 CUDA 13.0.48
-                                       Vulkan: 1.4.309
-
-██████████████████████████████████████████
-
-Report generated on: 2025-08-10 19:39:18
+pysinfo --logo windows      # force a platform logo for preview
+pysinfo --logo macos        # aliases: mac, darwin, osx, apple
+pysinfo --logo bsd          # aliases: freebsd, openbsd, netbsd, dragonfly
+pysinfo --logo linux        # alias: tux
+pysinfo --logo default      # generic icon for unknown systems
 ```
 
-
+## Example
 
 ```Bash
-╒════════════════════════════════════════════════════════════════╕
-│     PySinfo: A Python Tool to Get System Infomation            │
-╘════════════════════════════════════════════════════════════════╛
+╒═══════════════════════════════════════════════════════════════╕
+│        PySinfo: A Python Tool to Get System Infomation        │
+╘═══════════════════════════════════════════════════════════════╛
 
-         _nnnn_                         OS: Ubuntu 24.04
-        dGGGGMMb                        Host: MSI
-       @p~qp~~qMb                       Kernel: 5.15.167.4-microsoft-standard-WSL2
-       M|@||@) M|                       Uptime: 0 days, 0 hours, 0 minutes
-       @,----.JM|                       Shell: bash
-      JS^\__/  qKL                      Terminal: 87x48
-     dZP        qKRb
-    dZP          qKKb                   Hardware:
-   fZP            SMMb                  CPU Model: AMD Ryzen 9 7945HX with Radeon Graphics
-   HZM            MMMM                  CPU Architecture: x86_64
-   FqM            MMMM                  CPU Current Freq: 2.50 GHz
- __| ".        |\dS"qML                 CPU Cores: 4 (Physical), 8 (Logical)
- |    `.       | `' \Zq                 CPU Usage: 0.0%
-_)      \.___.,|     .'                 GPU: NVIDIA GeForce RTX 4060 Laptop GPU (8.00 GB)
-\____   )MMMMMP|   .'                   Memory: 716.67 MB / 31.35 GB (3.5%)
-     `-'       `--'                     Memory Slots: Unknown
-                                        Memory Speed: Unknown
-                                        Disk: 155.09 GB / 1006.85 GB (16.2%)
+OS: Ubuntu 26.04                                                                          .---.
+Host: aimax                                                                              /     \
+Kernel: 7.0.0-38-generic                                                                 \.o o./
+Uptime: 26d 13h 53m                                                                      /`\_/`\
+Shell: bash                                                                             //  _  \\
+Terminal: 100x24                                                                       | \     )|_
+                                                                                      /`\_`>  <_/ \
+Hardware:                                                                             \__/'---'\__/
+CPU Model: AMD RYZEN AI MAX+ 395 w/ Radeon 8060S
+CPU Architecture: x86_64
+CPU Current Freq: 3.54 GHz
+CPU Cores: 16 (Physical), 32 (Logical)
+CPU Usage: 0.0%
+GPU: Strix Halo [Radeon Graphics / Radeon 8050S Graphics / Radeon 8060S Graphics]
+Memory: 51.57 GB / 119.24 GB (43.2%)
+Disk: 914.96 GB / 3.58 TB (26.3%)
 
-                                        Network:
-                                        IP Address: 127.0.1.1
+Network:
+IP Address: 192.168.0.124
 
-                                        Development Environment:
-                                        Python: 3.11.7 (CPython)
-                                        Python Path: /home/fred/anaconda3/bin/python
+Development Environment:
+Python: 3.12.14 (CPython)
+Python Path: ~/miniconda3/envs/dev/bin/python3.12
 
-                                        Graphics API Support:
-                                        CUDA: 12.9.86
-                                        OpenCL: Not detected
-                                        Vulkan: Not detected
+Graphics API Support:
+CUDA: Not available
+OpenCL: Not detected
+Vulkan: 1.4.341
 
-██████████████████████████████████████████
+████████████████████████████████████████████████████████████████████████████████████████████████████
 
-Report generated on: 2025-08-10 19:36:05
+Report generated on: 2026-11-08 08:54:38
 ```
+
+## Requirements
+
+- Python 3.8+
+- `psutil`, `distro`, `GPUtil-fix`, `colorama`
+- Optional: `pyopencl` (better OpenCL detection when an ICD is installed)
+
+## License
+
+MIT

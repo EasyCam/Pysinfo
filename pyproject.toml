@@ -42,7 +42,7 @@ Homepage = "https://github.com/EasyCam/Pysinfo"
 Repository = "https://github.com/EasyCam/Pysinfo"
 
 [project.scripts]
-pysinfo = "pysinfo.__main__:print_system_info"
+pysinfo = "pysinfo.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

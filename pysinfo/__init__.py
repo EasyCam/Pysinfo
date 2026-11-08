@@ -1,8 +1,8 @@
 """
 PySInfo: A python command line tool that displays information about the current system, including hardware and critical software.
-version 1.3.0
+version 1.3.3
 """
-__version__ = "1.3.2"
+__version__ = "1.3.3"
 
 import platform
 import psutil
@@ -16,6 +16,7 @@ import colorama
 import sys
 import subprocess
 import re
+import unicodedata
 from colorama import Fore, Style, Back
 
 def get_system_info():
@@ -53,7 +54,11 @@ def get_system_info():
     
     # Python Information
     info["python_version"] = f"{platform.python_version()} ({platform.python_implementation()})"
-    info["python_path"] = sys.executable
+    exe = sys.executable
+    home = os.path.expanduser("~")
+    if home and home != os.sep and exe.startswith(home):
+        exe = "~" + exe[len(home):]
+    info["python_path"] = exe
     
     # Try to get GPU info and CUDA support
     try:
@@ -68,7 +73,8 @@ def get_system_info():
             cuda_version = check_cuda_version()
             info["cuda"] = cuda_version if cuda_version else "Not detected"
         else:
-            info["gpu"] = "No dedicated GPU detected"
+            fallback_gpus = get_fallback_gpus()
+            info["gpu"] = " | ".join(fallback_gpus) if fallback_gpus else "No dedicated GPU detected"
             info["cuda"] = "Not available"
     except Exception as e:
         if platform.system() == "Darwin":
@@ -95,10 +101,7 @@ def get_system_info():
     info["disk"] = f"{bytes_to_readable(disk.used)} / {bytes_to_readable(disk.total)} ({disk.percent}%)"
     
     # Network Information
-    try:
-        info["ip_address"] = socket.gethostbyname(socket.gethostname())
-    except socket.gaierror:
-        info["ip_address"] = "Not detected"
+    info["ip_address"] = get_primary_ip()
     
     # Shell Information
     if platform.system() == "Windows":
@@ -516,7 +519,7 @@ def get_detailed_memory_info():
                 # Try using dmidecode if available
                 try:
                     # This requires sudo permissions - may not work without them
-                    result = subprocess.run(["sudo", "dmidecode", "--type", "memory"], capture_output=True, text=True)
+                    result = subprocess.run(["sudo", "-n", "dmidecode", "--type", "memory"], capture_output=True, text=True, timeout=10)
                     if result.returncode == 0:
                         output = result.stdout
                         
@@ -534,12 +537,66 @@ def get_detailed_memory_info():
                         speed_match = re.search(r"Speed: (\d+ MHz)", output)
                         if speed_match:
                             memory_info["speed"] = speed_match.group(1)
-                except:
+                except (subprocess.SubprocessError, FileNotFoundError, OSError):
                     pass
+                if memory_info["slots"] == "Unknown":
+                    memory_info["slots"] = "Unknown (needs root)"
+                if memory_info["speed"] == "Unknown":
+                    memory_info["speed"] = "Unknown (needs root)"
     except Exception as e:
         pass
     
     return memory_info
+
+def get_fallback_gpus():
+    """Detect GPUs without root or NVML (lspci first, then sysfs vendor IDs)."""
+    gpus = []
+    if platform.system() == "Linux":
+        try:
+            result = subprocess.run(["lspci"], capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                for line in result.stdout.splitlines():
+                    if re.search(r"(VGA compatible controller|3D controller|Display controller)", line):
+                        name = line.split(":", 2)[-1].strip()
+                        name = re.sub(r"^.*\[AMD/ATI\]\s*", "", name)
+                        name = name.split("(")[0].strip()
+                        if name and name not in gpus:
+                            gpus.append(name)
+        except (subprocess.SubprocessError, FileNotFoundError):
+            pass
+        if not gpus:
+            vendor_names = {"0x1002": "AMD GPU", "0x10de": "NVIDIA GPU", "0x8086": "Intel GPU"}
+            try:
+                for card in sorted(os.listdir("/sys/class/drm")):
+                    if not re.match(r"card\d+$", card):
+                        continue
+                    try:
+                        with open(f"/sys/class/drm/{card}/device/vendor") as f:
+                            vendor = f.read().strip()
+                    except OSError:
+                        continue
+                    name = vendor_names.get(vendor)
+                    if name and name not in gpus:
+                        gpus.append(name)
+            except OSError:
+                pass
+    return gpus
+
+def get_primary_ip():
+    """Best-effort LAN IP without root (UDP connect trick sends no packets)."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(1)
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except OSError:
+        pass
+    try:
+        ip = socket.gethostbyname(socket.gethostname())
+        return ip if not ip.startswith("127.") else "Not detected"
+    except socket.gaierror:
+        return "Not detected"
+
 def check_cuda_version():
     try:
         if platform.system() == "Windows":
@@ -590,6 +647,15 @@ def check_opencl_version():
                         if "OpenCL" in line:
                             return line.strip()
         
+        # Last resort: portable detection through the pyopencl binding
+        try:
+            import pyopencl as cl
+            platforms = cl.get_platforms()
+            if platforms:
+                return f"{platforms[0].name} ({platforms[0].version})"
+        except Exception:
+            pass
+
         return "Not detected"
     except:
         return "Not detected"
@@ -635,7 +701,13 @@ def get_uptime():
     days, remainder = divmod(uptime.total_seconds(), 86400)
     hours, remainder = divmod(remainder, 3600)
     minutes, _ = divmod(remainder, 60)
-    return f"{int(days)} days, {int(hours)} hours, {int(minutes)} minutes"
+    parts = []
+    if days:
+        parts.append(f"{int(days)}d")
+    if hours:
+        parts.append(f"{int(hours)}h")
+    parts.append(f"{int(minutes)}m")
+    return " ".join(parts)
 
 def bytes_to_readable(bytes):
     for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
@@ -644,100 +716,168 @@ def bytes_to_readable(bytes):
         bytes /= 1024
     return f"{bytes:.2f} PB"
 
-def get_ascii_logo(system):
+# Tux by Joan G. Stark (jgs): compact and detailed variants.
+_TUX_SMALL = [
+    "       .---.",
+    "      /     \\",
+    "      \\.o o./",
+    "      /`\\_/`\\",
+    "     //  _  \\\\",
+    "    | \\     )|_",
+    "   /`\\_`>  <_/ \\",
+    "   \\__/'---'\\__/",
+]
+
+_TUX_LARGE = [
+    "              ___",
+    "           ,-'   '-.",
+    "          /  _   _  \\",
+    "          | (o)_(o) |",
+    "          \\ .-\"\"-.  /",
+    "          //`._.-'`\\\\",
+    "         //   :    ; \\",
+    "        //. - '' -.|  |",
+    "       /(    :     |  |",
+    "      |  \\__:     ,/  /,",
+    "     _;'`,_/'     |`.-' `\\",
+    "    )     `\\.___./;     .'",
+    "    '.__    )----'\\__.-'",
+    "        `\"\"`",
+]
+
+# BSD Daemon (Beastie) head, after Felix Lee's classic FreeBSD boot art.
+_BSD_DAEMON = [
+    "     ,        ,",
+    "    /(        )`",
+    "    \\ \\___   / |",
+    "    /-  _   `-/  '",
+    "   ( /\\/ \\  \\   /\\",
+    "    / /   |  `    \\",
+    "    O O )  /    |",
+    "    `-^--' `<     '",
+]
+
+def get_ascii_logo(system, max_width=None):
     logos = {
         "Windows": [
-            "                                ..,",
-            "                    ....,,:;+ccllll",
-            "      ...,,+:;  cllllllllllllllllll",
-            ",cclllllllllll  lllllllllllllllllll",
-            "llllllllllllll  lllllllllllllllllll",
-            "llllllllllllll  lllllllllllllllllll",
-            "llllllllllllll  lllllllllllllllllll",
-            "llllllllllllll  lllllllllllllllllll",
-            "llllllllllllll  lllllllllllllllllll",
-            "                                   ",
-            "llllllllllllll  lllllllllllllllllll",
-            "llllllllllllll  lllllllllllllllllll",
-            "llllllllllllll  lllllllllllllllllll",
-            "llllllllllllll  lllllllllllllllllll",
-            "llllllllllllll  lllllllllllllllllll",
-            "`'ccllllllllll  lllllllllllllllllll",
-            "       `' \\*::  :ccllllllllllllllll",
-            "                       ````''*::cll",
-            "                                 ``",
+            "    _____  _____",
+            "   |     ||     |",
+            "   |     ||     |",
+            "   |_____||_____|",
+            "    _____  _____",
+            "   |     ||     |",
+            "   |     ||     |",
+            "   |_____||_____|",
         ],
-        "Linux": [
-            "         _nnnn_                     ",
-            "        dGGGGMMb                    ",
-            "       @p~qp~~qMb                   ",
-            "       M|@||@) M|                   ",
-            "       @,----.JM|                   ",
-            "      JS^\\__/  qKL                  ",
-            "     dZP        qKRb                ",
-            "    dZP          qKKb               ",
-            "   fZP            SMMb              ",
-            "   HZM            MMMM              ",
-            "   FqM            MMMM              ",
-            " __| \".        |\\dS\"qML             ",
-            " |    `.       | `' \\Zq             ",
-            "_)      \\.___.,|     .'             ",
-            "\\____   )MMMMMP|   .'               ",
-            "     `-'       `--'                 ",
-        ],
+        "Linux": [],
         "Darwin": [
-            "                  #####           ",
-            "                 ######           ",
-            "                ######            ",
-            "               #######            ",
-            "              #######             ",
-            "             #######              ",
-            "            #######               ",
-            "           #######  #####         ",
-            "          ####### #######         ",
-            "         ##################       ",
-            "        #################         ",
-            "       ################           ",
-            "      ###############             ",
-            "     ##############               ",
-            "    #############                 ",
-            "   ############                   ",
-            "  ###########                     ",
+            "        .:'",
+            "    __ :'__",
+            " .'`  `-'  ``.",
+            ":          .-'",
+            ":         :",
+            " `.__.-.__.'",
         ],
     }
     
     default_logo = [
-            "   _____       _____        __           ",
-            "  |  __ \\     / ____|      / _|         ",
-            "  | |__) |   | (___   ___ | |_ ___       ",
-            "  |  ___/ | | \\___ \\ / _ \\|  _/ _ \\  ",
-            "  | |   | |_| |___) | (_) | || (_) |     ",
-            "  |_|    \\__, |____/ \\___/|_| \\___/   ",
-            "          __/ |                          ",
-            "         |___/                           ",
+            "     ________",
+            "    |  ____  |",
+            "    | |    | |",
+            "    | |____| |",
+            "    |________|",
+            "       |  |",
+            "     __|__|__",
+            "    |________|",
         ]
     
+    if system == "Linux":
+        if max_width is not None:
+            for art in (_TUX_LARGE, _TUX_SMALL):
+                if max(len(line) for line in art) <= max_width:
+                    return art
+        return _TUX_SMALL
+    if system in ("FreeBSD", "OpenBSD", "NetBSD", "DragonFly"):
+        return _BSD_DAEMON
     return logos.get(system, default_logo)
 
-def print_system_info():
+# Below this many columns the logo no longer sits beside the info block.
+_MIN_INFO_WIDTH = 24
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+def _display_width(text):
+    """Width of a plain string in terminal cells (CJK glyphs count as two)."""
+    return sum(2 if unicodedata.east_asian_width(c) in ("W", "F") else 1 for c in text)
+
+def _visible_len(text):
+    """Display width of a colored string (ANSI escapes do not count)."""
+    return _display_width(_ANSI_RE.sub("", text))
+
+def _truncate_to_width(text, max_width):
+    """Cut *text* to *max_width* cells, keeping colors and adding an ellipsis."""
+    if max_width <= 0 or _visible_len(text) <= max_width:
+        return text
+    budget = max(max_width - 1, 0)  # room for the ellipsis
+    out = []
+    width = 0
+    pos = 0
+    while pos < len(text):
+        if text[pos] == "\x1b":
+            match = _ANSI_RE.match(text, pos)
+            if match:
+                out.append(match.group(0))
+                pos = match.end()
+                continue
+        cell = 2 if unicodedata.east_asian_width(text[pos]) in ("W", "F") else 1
+        if width + cell > budget:
+            break
+        out.append(text[pos])
+        width += cell
+        pos += 1
+    return "".join(out) + "…" + Style.RESET_ALL
+
+# Aliases accepted by --logo, mapped to platform.system() names.
+_LOGO_ALIASES = {
+    "linux": "Linux", "tux": "Linux",
+    "windows": "Windows", "win": "Windows",
+    "macos": "Darwin", "mac": "Darwin", "darwin": "Darwin", "osx": "Darwin", "apple": "Darwin",
+    "bsd": "FreeBSD", "freebsd": "FreeBSD", "openbsd": "OpenBSD",
+    "netbsd": "NetBSD", "dragonfly": "DragonFly",
+    "default": "Unknown", "unknown": "Unknown", "other": "Unknown",
+}
+
+def _resolve_logo_os(value):
+    """Map a --logo argument to a platform name, or fail with a clear error."""
+    if value in ("Linux", "Windows", "Darwin", "FreeBSD", "OpenBSD", "NetBSD", "DragonFly"):
+        return value
+    key = value.strip().lower()
+    if key in _LOGO_ALIASES:
+        return _LOGO_ALIASES[key]
+    raise SystemExit(
+        f"pysinfo: unknown logo '{value}'; choose from: "
+        + ", ".join(sorted(set(_LOGO_ALIASES)))
+    )
+
+def print_system_info(logo_os=None):
     colorama.init()
     system_info = get_system_info()
-    ascii_logo = get_ascii_logo(platform.system())
+    # --logo can force another platform's logo/colors (useful for testing)
+    ui_os = _resolve_logo_os(logo_os) if logo_os else platform.system()
     
     # ANSI Color codes for different OS
     color = Fore.CYAN  # Default color
-    if platform.system() == "Windows":
+    if ui_os == "Windows":
         color = Fore.BLUE
-    elif platform.system() == "Linux":
+    elif ui_os == "Linux":
         color = Fore.GREEN
-    elif platform.system() == "Darwin":
+    elif ui_os == "Darwin":
         color = Fore.WHITE
     
-    # Header
-    print(f"\n{Style.BRIGHT}{Back.BLACK}{color}╒════════════════════════════════════════════════════════════════╕{Style.RESET_ALL}")
-    print(f"{Style.BRIGHT}{Back.BLACK}{color}│     PySinfo: A Python Tool to Get System Infomation            │{Style.RESET_ALL}")
-    print(f"{Style.BRIGHT}{Back.BLACK}{color}╘════════════════════════════════════════════════════════════════╛{Style.RESET_ALL}\n")
-    
+    # Fit everything into the current terminal width so nothing wraps
+    cols = max(shutil.get_terminal_size().columns, 20)
+    spacing = 4
+
     # Prepare data display
     data_lines = [
         f"{color}OS:{Style.RESET_ALL} {system_info['os']}",
@@ -772,27 +912,64 @@ def print_system_info():
         f"{color}Vulkan:{Style.RESET_ALL} {system_info['vulkan']}",
     ]
     
-    # Calculate spacing
+    # Drop lines whose value needs root but was not available (e.g. SMBIOS)
+    data_lines = [line for line in data_lines if "Unknown (needs root)" not in line]
+    info_w = max(_visible_len(line) for line in data_lines)
+
+    # Pick the largest logo that still leaves the info block fully visible
+    ascii_logo = get_ascii_logo(ui_os, max_width=cols - info_w - spacing - 1)
     logo_width = max(len(line) for line in ascii_logo)
-    spacing = 4
-    
-    # Print logo and info side by side
+    side_by_side = cols >= logo_width + spacing + _MIN_INFO_WIDTH
+    info_budget = max((cols - logo_width - spacing if side_by_side else cols) - 1, 8)
+
+    # Header (box shrinks with the terminal)
+    box_inner = max(min(65, cols) - 2, 4)
+    title = _truncate_to_width("PySinfo: A Python Tool to Get System Infomation", box_inner - 2)
+    pad = max(box_inner - _visible_len(title), 0)
+    left = pad // 2
+    right = pad - left
+    print(f"\n{Style.BRIGHT}{Back.BLACK}{color}╒{'═' * box_inner}╕{Style.RESET_ALL}")
+    print(f"{Style.BRIGHT}{Back.BLACK}{color}│{' ' * left}{title}{' ' * right}│{Style.RESET_ALL}")
+    print(f"{Style.BRIGHT}{Back.BLACK}{color}╘{'═' * box_inner}╛{Style.RESET_ALL}\n")
+
+    # Everything must fit the physical width; rows sharing a line with the logo
+    # give up extra width, the rest of the block uses the full terminal width.
     logo_length = len(ascii_logo)
-    for i in range(min(logo_length, len(data_lines))):
-        logo_line = ascii_logo[i]
-        info_line = data_lines[i]
-        print(f"{color}{logo_line}{' ' * spacing}{Style.RESET_ALL}{info_line}")
+    data_lines = [_truncate_to_width(line, max(cols - 1, 8)) for line in data_lines]
+    if side_by_side:
+        for i in range(min(logo_length, len(data_lines))):
+            data_lines[i] = _truncate_to_width(data_lines[i], info_budget)
+
+    if not side_by_side:
+        # Terminal too narrow for logo + info: stack the logo above the block
+        for logo_line in ascii_logo:
+            print(f"{color}{_truncate_to_width(logo_line, cols)}{Style.RESET_ALL}")
+        print()
+        for info_line in data_lines:
+            print(info_line)
+    else:
+        # Info left-aligned, logo to the right of the OS block
+        info_w = max(_visible_len(line) for line in data_lines)
+        logo_col = max(min(info_w, cols - logo_width - spacing - 1), 0)
+        for i, info_line in enumerate(data_lines):
+            if i < logo_length:
+                pad = " " * max(logo_col - _visible_len(info_line), 0)
+                print(f"{info_line}{pad}{' ' * spacing}{color}{ascii_logo[i].ljust(logo_width)}{Style.RESET_ALL}")
+            else:
+                print(info_line)
     
-    # Print remaining info
-    for i in range(logo_length, len(data_lines)):
-        print(f"{' ' * (logo_width + spacing)}{data_lines[i]}")
-    
-    # Print color blocks
-    print("\n" + "".join(f"{color}██████{Style.RESET_ALL}" for color in [Fore.RED, Fore.GREEN, Fore.YELLOW, Fore.BLUE, Fore.MAGENTA, Fore.CYAN, Fore.WHITE]))
+    # Print color blocks across the full terminal width
+    palette = [Fore.RED, Fore.GREEN, Fore.YELLOW, Fore.BLUE, Fore.MAGENTA, Fore.CYAN, Fore.WHITE]
+    n_blocks, remainder = divmod(cols, 6)
+    bar = "".join(f"{palette[i % len(palette)]}██████{Style.RESET_ALL}" for i in range(max(n_blocks, 1)))
+    if remainder and n_blocks:
+        bar += f"{palette[n_blocks % len(palette)]}{'█' * remainder}{Style.RESET_ALL}"
+    print("\n" + bar)
     
     # Footer
     current_time = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"\n{Style.DIM}Report generated on: {current_time}{Style.RESET_ALL}")
+    footer = _truncate_to_width(f"Report generated on: {current_time}", max(cols, 8))
+    print(f"\n{Style.DIM}{footer}{Style.RESET_ALL}")
 
 if __name__ == "__main__":
     print_system_info()
