@@ -875,7 +875,26 @@ def _resolve_logo_os(value):
         + ", ".join(sorted(set(_LOGO_ALIASES)))
     )
 
+def _ensure_utf8_stdout():
+    """Switch stdout to UTF-8 so the box-drawing output never crashes.
+
+    On Windows with a legacy console code page (e.g. cp1252) printing the
+    header box raises UnicodeEncodeError. Reconfiguring to UTF-8 keeps the
+    output intact; a console without the glyphs shows replacements instead
+    of the program dying. Streams that cannot be reconfigured are left
+    alone.
+    """
+    stream = sys.stdout
+    if stream is None:
+        return
+    try:
+        stream.reconfigure(encoding="utf-8")
+    except (AttributeError, OSError, ValueError):
+        pass
+
+
 def print_system_info(logo_os=None):
+    _ensure_utf8_stdout()
     colorama.init()
     system_info = get_system_info()
     # --logo can force another platform's logo/colors (useful for testing)
